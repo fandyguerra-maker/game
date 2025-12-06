@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Laberinto descargable</title>
+  <style>
+    :root{--bg:#0f172a;--cell:#e2e8f0;--player:#06b6d4;--goal:#10b981;--coin:#f59e0b}
+    html,body{height:100%;margin:0;background:linear-gradient(180deg,#020617 0%,var(--bg) 100%);font-family:Inter,Segoe UI,Arial,sans-serif;color:#e6eef6}
+    .wrap{display:flex;flex-direction:column;align-items:center;padding:18px}
+    h1{margin:6px 0 10px;font-size:20px}
+    #game{background:#0b1220;border-radius:12px;padding:12px;box-shadow:0 8px 30px rgba(2,6,23,.6)}
+    canvas{display:block;background:#071029;border-radius:8px}
+    .hud{display:flex;gap:12px;align-items:center;margin-top:8px}
+    button{background:#0ea5a9;border:0;padding:8px 12px;border-radius:8px;color:white;cursor:pointer}
+    .small{font-size:13px;color:#cbd5e1}
+    .controls{margin-top:8px;color:#94a3b8}
+    .touch{display:none;margin-top:10px}
+    @media (max-width:700px){.wrap{padding:8px}.touch{display:flex;gap:8px}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Encuéntrame</h1>
+    <div id="game">
+      <canvas id="c" width="640" height="640"></canvas>
+      <div class="hud">
+        <div class="small">Nivel: <span id="level">1</span></div>
+        <div class="small">Tiempo: <span id="time">0.0</span>s</div>
+        <div class="small"></div>
+        <button id="new">Nuevo laberinto</button>
+        <button id="download">Descargar .html</button>
+      </div>
+      <div class="controls small">Usa flechas o WASD para moverte. Objetivo: llegar al recuadro verde.</div>
+      <div class="touch">
+        <button id="up">▲</button>
+        <div style="display:flex;gap:8px">
+          <button id="left">◀</button>
+          <button id="down">▼</button>
+          <button id="right">▶</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* Laberinto simple — single-file
+   Controles: flechas/WASD, o botones táctiles.
+   Guardar este archivo como laberinto.html y abrir en el navegador. */
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const newBtn = document.getElementById('new');
+const dlBtn = document.getElementById('download');
+const timeEl = document.getElementById('time');
+const levelEl = document.getElementById('level');
+// removed coins element
+
+let cols = 16; // celdas por lado (ajustable)
+let rows = 16;
+let cellSize = Math.floor(canvas.width / cols);
+let grid = [];
+let stack = [];
+let player = {x:0,y:0};
+let goal = {x:cols-1,y:rows-1};
+let coins = [];
+let coinCount = 0;
+let level = 1;
+let startTime = null;
+let timer = null;
+
+class Cell{
+  constructor(i,j){this.i=i;this.j=j;this.walls=[true,true,true,true];this.visited=false}
+  index(i,j){if(i<0||j<0||i>=cols||j>=rows) return -1;return i + j*cols}
+}
+
+function idx(i,j){if(i<0||j<0||i>=cols||j>=rows) return -1;return i + j*cols}
+
+function setup(){
+  cellSize = Math.floor(canvas.width / cols);
+  grid = [];
+  for(let j=0;j<rows;j++) for(let i=0;i<cols;i++) grid.push(new Cell(i,j));
+  current = grid[0];
+  current.visited = true;
+  stack = [current];
+  // Carve maze — recursive backtracker
+  while(stack.length){
+    let cell = stack[stack.length-1];
+    let neighbors = [];
+    const dirs = [[1,0,0],[0,1,1],[-1,0,2],[0,-1,3]]; // right,down,left,up (last value for wall index)
+    for(const d of dirs){
+      let ni=cell.i+d[0], nj=cell.j+d[1];
+      let ind = idx(ni,nj);
+      if(ind!=-1 && !grid[ind].visited) neighbors.push([grid[ind],d[2]]);
+    }
+    if(neighbors.length){
+      let [next,wallDir] = neighbors[Math.floor(Math.random()*neighbors.length)];
+      // remove walls between cell and next
+      let di = next.i - cell.i; let dj = next.j - cell.j;
+      if(di===1){cell.walls[0]=false; next.walls[2]=false;} // right-left
+      if(di===-1){cell.walls[2]=false; next.walls[0]=false;} 
+      if(dj===1){cell.walls[1]=false; next.walls[3]=false;} // down-up
+      if(dj===-1){cell.walls[3]=false; next.walls[1]=false;}
+      next.visited=true;
+      stack.push(next);
+    } else {stack.pop();}
+  }
+  // place player at (0,0), goal at bottom-right
+  player.x=0; player.y=0; goal.x=cols-1; goal.y=rows-1;
+  // no coins
+  coins = [];
+  coinCount = 0; updateHUD();
+  startTime = performance.now(); if(timer) clearInterval(timer);
+  timer = setInterval(()=>{timeEl.textContent = ((performance.now()-startTime)/1000).toFixed(1)},100);
+}
+
+function updateHUD(){levelEl.textContent = level; coinsEl.textContent = coinCount}
+
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  // background
+  ctx.fillStyle = '#071029'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  // draw cells and walls
+  for(let j=0;j<rows;j++){
+    for(let i=0;i<cols;i++){
+      let cell = grid[idx(i,j)];
+      let x=i*cellSize, y=j*cellSize;
+      // walls
+      ctx.strokeStyle='#93c5fd'; ctx.lineWidth=2;
+      if(cell.walls[0]){ctx.beginPath();ctx.moveTo(x+cellSize,y);ctx.lineTo(x+cellSize,y+cellSize);ctx.stroke();}
+      if(cell.walls[1]){ctx.beginPath();ctx.moveTo(x,y+cellSize);ctx.lineTo(x+cellSize,y+cellSize);ctx.stroke();}
+      if(cell.walls[2]){ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,y+cellSize);ctx.stroke();}
+      if(cell.walls[3]){ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+cellSize,y);ctx.stroke();}
+    }
+  }
+  // no coins to draw
+  // draw goal (F)
+  ctx.fillStyle = 'rgb(16,185,129)';
+  ctx.font = `${cellSize*0.7}px Arial`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('F', goal.x*cellSize+cellSize/2, goal.y*cellSize+cellSize/2);(goal.x*cellSize+cellSize*0.12, goal.y*cellSize+cellSize*0.12, cellSize*0.76, cellSize*0.76);
+  // draw player (K)
+  ctx.fillStyle = '#06b6d4';
+  ctx.font = `${cellSize*0.9}px Arial Black`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('K', player.x*cellSize+cellSize/2, player.y*cellSize+cellSize/2);('K', player.x*cellSize+cellSize/2, player.y*cellSize+cellSize/2);Style = 'rgb(6,182,212)'; ctx.beginPath(); ctx.arc(player.x*cellSize+cellSize/2, player.y*cellSize+cellSize/2, cellSize*0.28,0,Math.PI*2); ctx.fill();
+}
+
+function canMove(dx,dy){
+  const cur = grid[idx(player.x,player.y)];
+  if(dx===1 && cur.walls[0]) return false;
+  if(dx===-1 && cur.walls[2]) return false;
+  if(dy===1 && cur.walls[1]) return false;
+  if(dy===-1 && cur.walls[3]) return false;
+  return true;
+}
+
+function move(dx,dy){
+  if(!canMove(dx,dy)) return;
+  player.x += dx; player.y += dy;
+  // collect coin?
+  let foundIdx = coins.findIndex(c=>c.x===player.x && c.y===player.y);
+  if(foundIdx!==-1){coins.splice(foundIdx,1); }
+  // check goal
+  if(player.x===goal.x && player.y===goal.y){
+    clearInterval(timer);
+    const time = ((performance.now()-startTime)/1000).toFixed(1);
+    setTimeout(()=>{
+      if(confirm(`Me encontraste, sorprenderte mi amor. Tiempo: ${time}s. Monedas: ${coinCount}. ¿Siguiente nivel?`)){
+        level++; cols = Math.min(28, cols+2); rows = Math.min(28, rows+2); setup(); updateHUD(); draw();
+      } else {setup(); draw();}
+    },100);
+  }
+  draw();
+}
+
+// keyboard
+window.addEventListener('keydown', e=>{
+  if(['ArrowUp','w','W'].includes(e.key)) {move(0,-1); e.preventDefault();}
+  if(['ArrowDown','s','S'].includes(e.key)) {move(0,1); e.preventDefault();}
+  if(['ArrowLeft','a','A'].includes(e.key)) {move(-1,0); e.preventDefault();}
+  if(['ArrowRight','d','D'].includes(e.key)) {move(1,0); e.preventDefault();}
+});
+
+// touch buttons
+['up','down','left','right'].forEach(id=>{const b=document.getElementById(id); if(b) b.addEventListener('click',()=>{if(id==='up')move(0,-1); if(id==='down')move(0,1); if(id==='left')move(-1,0); if(id==='right')move(1,0);});});
+
+newBtn.addEventListener('click', ()=>{cols=16;rows=16;level=1;setup();draw();});
+
+// download: create blob of this page's outerHTML
+dlBtn.addEventListener('click', ()=>{
+  const html = `<!doctype html>\n${document.documentElement.outerHTML}`;
+  const blob = new Blob([html],{type:'text/html'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download='laberinto.html'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+});
+
+// resize canvas for nicer cell sizes on small screens
+function fit(){
+  const max = Math.min(window.innerWidth-40, 720);
+  canvas.width = canvas.height = Math.max(320, Math.floor(max));
+}
+window.addEventListener('resize', ()=>{fit(); cellSize = Math.floor(canvas.width/cols); draw();});
+
+// initial
+fit(); setup(); draw();
+</script>
+</body>
+</html>
